@@ -1,4 +1,4 @@
-// Teaser List without title - Updated September 29, 2023
+// Teaser List without title - Updated October 7, 2023
 function noop() { }
 function assign(tar, src) {
     // @ts-ignore
