@@ -3305,7 +3305,7 @@ function create_fragment(ctx) {
 			section = element("section");
 			div = element("div");
 			h2 = element("h2");
-			t0 = text("Δίαλεξε άθλημα:");
+			t0 = text("Scegli uno sport:");
 			t1 = space();
 			ul = element("ul");
 
@@ -3324,7 +3324,7 @@ function create_fragment(ctx) {
 			var div_nodes = children(div);
 			h2 = claim_element(div_nodes, "H2", { class: true });
 			var h2_nodes = children(h2);
-			t0 = claim_text(h2_nodes, "Δίαλεξε άθλημα:");
+			t0 = claim_text(h2_nodes, "Scegli uno sport:");
 			h2_nodes.forEach(detach);
 			t1 = claim_space(div_nodes);
 			ul = claim_element(div_nodes, "UL", { class: true });
