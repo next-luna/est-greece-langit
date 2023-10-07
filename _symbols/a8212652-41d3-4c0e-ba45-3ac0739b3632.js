@@ -2905,7 +2905,7 @@ function create_if_block(ctx) {
 		c() {
 			header = element("header");
 			div = element("div");
-			t0 = text("Προορισμοί για ");
+			t0 = text("destinazioni per ");
 			t1 = text(t1_value);
 			t2 = text(":");
 			t3 = space();
@@ -2922,7 +2922,7 @@ function create_if_block(ctx) {
 			var header_nodes = children(header);
 			div = claim_element(header_nodes, "DIV", { class: true });
 			var div_nodes = children(div);
-			t0 = claim_text(div_nodes, "Προορισμοί για ");
+			t0 = claim_text(div_nodes, "destinazioni per ");
 			t1 = claim_text(div_nodes, t1_value);
 			t2 = claim_text(div_nodes, ":");
 			div_nodes.forEach(detach);
