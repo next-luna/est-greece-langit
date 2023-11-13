@@ -1,5 +1,6 @@
-// Choose tour - Updated October 12, 2023
+// Site Header - Updated November 13, 2023
 function noop() { }
+const identity = x => x;
 function assign(tar, src) {
     // @ts-ignore
     for (const k in src)
@@ -21,6 +22,14 @@ function is_function(thing) {
 function safe_not_equal(a, b) {
     return a != a ? b == b : a !== b || ((a && typeof a === 'object') || typeof a === 'function');
 }
+let src_url_equal_anchor;
+function src_url_equal(element_src, url) {
+    if (!src_url_equal_anchor) {
+        src_url_equal_anchor = document.createElement('a');
+    }
+    src_url_equal_anchor.href = url;
+    return element_src === src_url_equal_anchor.href;
+}
 function is_empty(obj) {
     return Object.keys(obj).length === 0;
 }
@@ -31,8 +40,40 @@ function exclude_internal_props(props) {
             result[k] = props[k];
     return result;
 }
-function null_to_empty(value) {
-    return value == null ? '' : value;
+
+const is_client = typeof window !== 'undefined';
+let now = is_client
+    ? () => window.performance.now()
+    : () => Date.now();
+let raf = is_client ? cb => requestAnimationFrame(cb) : noop;
+
+const tasks = new Set();
+function run_tasks(now) {
+    tasks.forEach(task => {
+        if (!task.c(now)) {
+            tasks.delete(task);
+            task.f();
+        }
+    });
+    if (tasks.size !== 0)
+        raf(run_tasks);
+}
+/**
+ * Creates a new task that runs on each raf frame
+ * until it returns a falsy value or is aborted
+ */
+function loop(callback) {
+    let task;
+    if (tasks.size === 0)
+        raf(run_tasks);
+    return {
+        promise: new Promise(fulfill => {
+            tasks.add(task = { c: callback, f: fulfill });
+        }),
+        abort() {
+            tasks.delete(task);
+        }
+    };
 }
 
 // Track which nodes are claimed during hydration. Unclaimed nodes can then be removed from the DOM
@@ -135,6 +176,27 @@ function init_hydrate(target) {
         const anchor = j < lis.length ? lis[j] : null;
         target.insertBefore(toMove[i], anchor);
     }
+}
+function append(target, node) {
+    target.appendChild(node);
+}
+function get_root_for_style(node) {
+    if (!node)
+        return document;
+    const root = node.getRootNode ? node.getRootNode() : node.ownerDocument;
+    if (root && root.host) {
+        return root;
+    }
+    return node.ownerDocument;
+}
+function append_empty_stylesheet(node) {
+    const style_element = element('style');
+    append_stylesheet(get_root_for_style(node), style_element);
+    return style_element.sheet;
+}
+function append_stylesheet(node, style) {
+    append(node.head || node, style);
+    return style.sheet;
 }
 function append_hydration(target, node) {
     if (is_hydrating) {
@@ -346,10 +408,78 @@ function set_style(node, key, value, important) {
         node.style.setProperty(key, value, important ? 'important' : '');
     }
 }
+function toggle_class(element, name, toggle) {
+    element.classList[toggle ? 'add' : 'remove'](name);
+}
 function custom_event(type, detail, { bubbles = false, cancelable = false } = {}) {
     const e = document.createEvent('CustomEvent');
     e.initCustomEvent(type, bubbles, cancelable, detail);
     return e;
+}
+
+// we need to store the information for multiple documents because a Svelte application could also contain iframes
+// https://github.com/sveltejs/svelte/issues/3624
+const managed_styles = new Map();
+let active = 0;
+// https://github.com/darkskyapp/string-hash/blob/master/index.js
+function hash(str) {
+    let hash = 5381;
+    let i = str.length;
+    while (i--)
+        hash = ((hash << 5) - hash) ^ str.charCodeAt(i);
+    return hash >>> 0;
+}
+function create_style_information(doc, node) {
+    const info = { stylesheet: append_empty_stylesheet(node), rules: {} };
+    managed_styles.set(doc, info);
+    return info;
+}
+function create_rule(node, a, b, duration, delay, ease, fn, uid = 0) {
+    const step = 16.666 / duration;
+    let keyframes = '{\n';
+    for (let p = 0; p <= 1; p += step) {
+        const t = a + (b - a) * ease(p);
+        keyframes += p * 100 + `%{${fn(t, 1 - t)}}\n`;
+    }
+    const rule = keyframes + `100% {${fn(b, 1 - b)}}\n}`;
+    const name = `__svelte_${hash(rule)}_${uid}`;
+    const doc = get_root_for_style(node);
+    const { stylesheet, rules } = managed_styles.get(doc) || create_style_information(doc, node);
+    if (!rules[name]) {
+        rules[name] = true;
+        stylesheet.insertRule(`@keyframes ${name} ${rule}`, stylesheet.cssRules.length);
+    }
+    const animation = node.style.animation || '';
+    node.style.animation = `${animation ? `${animation}, ` : ''}${name} ${duration}ms linear ${delay}ms 1 both`;
+    active += 1;
+    return name;
+}
+function delete_rule(node, name) {
+    const previous = (node.style.animation || '').split(', ');
+    const next = previous.filter(name
+        ? anim => anim.indexOf(name) < 0 // remove specific animation
+        : anim => anim.indexOf('__svelte') === -1 // remove all Svelte animations
+    );
+    const deleted = previous.length - next.length;
+    if (deleted) {
+        node.style.animation = next.join(', ');
+        active -= deleted;
+        if (!active)
+            clear_rules();
+    }
+}
+function clear_rules() {
+    raf(() => {
+        if (active)
+            return;
+        managed_styles.forEach(info => {
+            const { ownerNode } = info.stylesheet;
+            // there is no ownerNode if it runs on jsdom.
+            if (ownerNode)
+                detach(ownerNode);
+        });
+        managed_styles.clear();
+    });
 }
 
 let current_component;
@@ -518,6 +648,20 @@ function flush_render_callbacks(fns) {
     targets.forEach((c) => c());
     render_callbacks = filtered;
 }
+
+let promise;
+function wait() {
+    if (!promise) {
+        promise = Promise.resolve();
+        promise.then(() => {
+            promise = null;
+        });
+    }
+    return promise;
+}
+function dispatch(node, direction, kind) {
+    node.dispatchEvent(custom_event(`${direction ? 'intro' : 'outro'}${kind}`));
+}
 const outroing = new Set();
 let outros;
 function group_outros() {
@@ -557,6 +701,113 @@ function transition_out(block, local, detach, callback) {
     else if (callback) {
         callback();
     }
+}
+const null_transition = { duration: 0 };
+function create_bidirectional_transition(node, fn, params, intro) {
+    const options = { direction: 'both' };
+    let config = fn(node, params, options);
+    let t = intro ? 0 : 1;
+    let running_program = null;
+    let pending_program = null;
+    let animation_name = null;
+    function clear_animation() {
+        if (animation_name)
+            delete_rule(node, animation_name);
+    }
+    function init(program, duration) {
+        const d = (program.b - t);
+        duration *= Math.abs(d);
+        return {
+            a: t,
+            b: program.b,
+            d,
+            duration,
+            start: program.start,
+            end: program.start + duration,
+            group: program.group
+        };
+    }
+    function go(b) {
+        const { delay = 0, duration = 300, easing = identity, tick = noop, css } = config || null_transition;
+        const program = {
+            start: now() + delay,
+            b
+        };
+        if (!b) {
+            // @ts-ignore todo: improve typings
+            program.group = outros;
+            outros.r += 1;
+        }
+        if (running_program || pending_program) {
+            pending_program = program;
+        }
+        else {
+            // if this is an intro, and there's a delay, we need to do
+            // an initial tick and/or apply CSS animation immediately
+            if (css) {
+                clear_animation();
+                animation_name = create_rule(node, t, b, duration, delay, easing, css);
+            }
+            if (b)
+                tick(0, 1);
+            running_program = init(program, duration);
+            add_render_callback(() => dispatch(node, b, 'start'));
+            loop(now => {
+                if (pending_program && now > pending_program.start) {
+                    running_program = init(pending_program, duration);
+                    pending_program = null;
+                    dispatch(node, running_program.b, 'start');
+                    if (css) {
+                        clear_animation();
+                        animation_name = create_rule(node, t, running_program.b, running_program.duration, 0, easing, config.css);
+                    }
+                }
+                if (running_program) {
+                    if (now >= running_program.end) {
+                        tick(t = running_program.b, 1 - t);
+                        dispatch(node, running_program.b, 'end');
+                        if (!pending_program) {
+                            // we're done
+                            if (running_program.b) {
+                                // intro — we can tidy up immediately
+                                clear_animation();
+                            }
+                            else {
+                                // outro — needs to be coordinated
+                                if (!--running_program.group.r)
+                                    run_all(running_program.group.c);
+                            }
+                        }
+                        running_program = null;
+                    }
+                    else if (now >= running_program.start) {
+                        const p = now - running_program.start;
+                        t = running_program.a + running_program.d * easing(p / running_program.duration);
+                        tick(t, 1 - t);
+                    }
+                }
+                return !!(running_program || pending_program);
+            });
+        }
+    }
+    return {
+        run(b) {
+            if (is_function(config)) {
+                wait().then(() => {
+                    // @ts-ignore
+                    config = config(options);
+                    go(b);
+                });
+            }
+            else {
+                go(b);
+            }
+        },
+        end() {
+            clear_animation();
+            running_program = pending_program = null;
+        }
+    };
 }
 
 function get_spread_update(levels, updates) {
@@ -731,6 +982,16 @@ class SvelteComponent {
             this.$$.skip_bound = false;
         }
     }
+}
+
+function fade(node, { delay = 0, duration = 400, easing = identity } = {}) {
+    const o = +getComputedStyle(node).opacity;
+    return {
+        delay,
+        duration,
+        easing,
+        css: t => `opacity: ${t * o}`
+    };
 }
 
 const matchIconName = /^[a-z0-9]+(-[a-z0-9]+)*$/;
@@ -2788,183 +3049,267 @@ let Component$1 = class Component extends SvelteComponent {
 
 function get_each_context(ctx, list, i) {
 	const child_ctx = ctx.slice();
-	child_ctx[7] = list[i].tourlink;
-	child_ctx[8] = list[i].tourname;
+	child_ctx[9] = list[i].link;
 	return child_ctx;
 }
 
 function get_each_context_1(ctx, list, i) {
 	const child_ctx = ctx.slice();
-	child_ctx[11] = list[i].sportname;
-	child_ctx[12] = list[i].availabletours;
+	child_ctx[9] = list[i].link;
 	return child_ctx;
 }
 
-// (84:6) {#each sports as {sportname,availabletours}}
-function create_each_block_1(ctx) {
-	let li;
-	let button;
-	let t0_value = /*sportname*/ ctx[11] + "";
-	let t0;
-	let button_class_value;
-	let t1;
-	let li_class_value;
-	let mounted;
-	let dispose;
-
-	function click_handler() {
-		return /*click_handler*/ ctx[4](/*sportname*/ ctx[11], /*availabletours*/ ctx[12]);
-	}
+// (123:33) 
+function create_if_block_4(ctx) {
+	let img;
+	let img_src_value;
+	let img_alt_value;
 
 	return {
 		c() {
-			li = element("li");
-			button = element("button");
-			t0 = text(t0_value);
-			t1 = space();
+			img = element("img");
 			this.h();
 		},
 		l(nodes) {
-			li = claim_element(nodes, "LI", { class: true });
-			var li_nodes = children(li);
-			button = claim_element(li_nodes, "BUTTON", { class: true });
-			var button_nodes = children(button);
-			t0 = claim_text(button_nodes, t0_value);
-			button_nodes.forEach(detach);
-			t1 = claim_space(li_nodes);
-			li_nodes.forEach(detach);
+			img = claim_element(nodes, "IMG", { src: true, alt: true });
 			this.h();
 		},
 		h() {
-			attr(button, "class", button_class_value = "" + (null_to_empty(/*selectedSport*/ ctx[1]?.sportname === /*sportname*/ ctx[11]
-			? "active"
-			: "") + " svelte-10dwopc"));
-
-			attr(li, "class", li_class_value = "" + (null_to_empty(/*selectedSport*/ ctx[1]?.sportname === /*sportname*/ ctx[11]
-			? "selected"
-			: "") + " svelte-10dwopc"));
+			if (!src_url_equal(img.src, img_src_value = /*logo*/ ctx[0].image.url)) attr(img, "src", img_src_value);
+			attr(img, "alt", img_alt_value = /*logo*/ ctx[0].image.alt);
 		},
 		m(target, anchor) {
-			insert_hydration(target, li, anchor);
-			append_hydration(li, button);
-			append_hydration(button, t0);
-			append_hydration(li, t1);
-
-			if (!mounted) {
-				dispose = listen(button, "click", click_handler);
-				mounted = true;
-			}
+			insert_hydration(target, img, anchor);
 		},
-		p(new_ctx, dirty) {
-			ctx = new_ctx;
-			if (dirty & /*sports*/ 1 && t0_value !== (t0_value = /*sportname*/ ctx[11] + "")) set_data(t0, t0_value);
-
-			if (dirty & /*selectedSport, sports*/ 3 && button_class_value !== (button_class_value = "" + (null_to_empty(/*selectedSport*/ ctx[1]?.sportname === /*sportname*/ ctx[11]
-			? "active"
-			: "") + " svelte-10dwopc"))) {
-				attr(button, "class", button_class_value);
+		p(ctx, dirty) {
+			if (dirty & /*logo*/ 1 && !src_url_equal(img.src, img_src_value = /*logo*/ ctx[0].image.url)) {
+				attr(img, "src", img_src_value);
 			}
 
-			if (dirty & /*selectedSport, sports*/ 3 && li_class_value !== (li_class_value = "" + (null_to_empty(/*selectedSport*/ ctx[1]?.sportname === /*sportname*/ ctx[11]
-			? "selected"
-			: "") + " svelte-10dwopc"))) {
-				attr(li, "class", li_class_value);
+			if (dirty & /*logo*/ 1 && img_alt_value !== (img_alt_value = /*logo*/ ctx[0].image.alt)) {
+				attr(img, "alt", img_alt_value);
 			}
 		},
 		d(detaching) {
-			if (detaching) detach(li);
-			mounted = false;
-			dispose();
+			if (detaching) detach(img);
 		}
 	};
 }
 
-// (92:4) {#if selectedSport}
+// (121:8) {#if logo.title}
+function create_if_block_3(ctx) {
+	let t_value = /*logo*/ ctx[0].title + "";
+	let t;
+
+	return {
+		c() {
+			t = text(t_value);
+		},
+		l(nodes) {
+			t = claim_text(nodes, t_value);
+		},
+		m(target, anchor) {
+			insert_hydration(target, t, anchor);
+		},
+		p(ctx, dirty) {
+			if (dirty & /*logo*/ 1 && t_value !== (t_value = /*logo*/ ctx[0].title + "")) set_data(t, t_value);
+		},
+		d(detaching) {
+			if (detaching) detach(t);
+		}
+	};
+}
+
+// (128:8) {#each site_nav as { link }}
+function create_each_block_1(ctx) {
+	let a;
+	let t_value = /*link*/ ctx[9].label + "";
+	let t;
+	let a_href_value;
+
+	return {
+		c() {
+			a = element("a");
+			t = text(t_value);
+			this.h();
+		},
+		l(nodes) {
+			a = claim_element(nodes, "A", { class: true, href: true });
+			var a_nodes = children(a);
+			t = claim_text(a_nodes, t_value);
+			a_nodes.forEach(detach);
+			this.h();
+		},
+		h() {
+			attr(a, "class", "link svelte-19bt6nw");
+			attr(a, "href", a_href_value = /*link*/ ctx[9].url);
+			toggle_class(a, "active", /*link*/ ctx[9].url === window.location.pathname);
+		},
+		m(target, anchor) {
+			insert_hydration(target, a, anchor);
+			append_hydration(a, t);
+		},
+		p(ctx, dirty) {
+			if (dirty & /*site_nav*/ 4 && t_value !== (t_value = /*link*/ ctx[9].label + "")) set_data(t, t_value);
+
+			if (dirty & /*site_nav*/ 4 && a_href_value !== (a_href_value = /*link*/ ctx[9].url)) {
+				attr(a, "href", a_href_value);
+			}
+
+			if (dirty & /*site_nav, window*/ 4) {
+				toggle_class(a, "active", /*link*/ ctx[9].url === window.location.pathname);
+			}
+		},
+		d(detaching) {
+			if (detaching) detach(a);
+		}
+	};
+}
+
+// (137:33) 
+function create_if_block_2(ctx) {
+	let img;
+	let img_src_value;
+	let img_alt_value;
+
+	return {
+		c() {
+			img = element("img");
+			this.h();
+		},
+		l(nodes) {
+			img = claim_element(nodes, "IMG", { src: true, alt: true });
+			this.h();
+		},
+		h() {
+			if (!src_url_equal(img.src, img_src_value = /*logo*/ ctx[0].image.url)) attr(img, "src", img_src_value);
+			attr(img, "alt", img_alt_value = /*logo*/ ctx[0].image.alt);
+		},
+		m(target, anchor) {
+			insert_hydration(target, img, anchor);
+		},
+		p(ctx, dirty) {
+			if (dirty & /*logo*/ 1 && !src_url_equal(img.src, img_src_value = /*logo*/ ctx[0].image.url)) {
+				attr(img, "src", img_src_value);
+			}
+
+			if (dirty & /*logo*/ 1 && img_alt_value !== (img_alt_value = /*logo*/ ctx[0].image.alt)) {
+				attr(img, "alt", img_alt_value);
+			}
+		},
+		d(detaching) {
+			if (detaching) detach(img);
+		}
+	};
+}
+
+// (135:8) {#if logo.title}
+function create_if_block_1(ctx) {
+	let t_value = /*logo*/ ctx[0].title + "";
+	let t;
+
+	return {
+		c() {
+			t = text(t_value);
+		},
+		l(nodes) {
+			t = claim_text(nodes, t_value);
+		},
+		m(target, anchor) {
+			insert_hydration(target, t, anchor);
+		},
+		p(ctx, dirty) {
+			if (dirty & /*logo*/ 1 && t_value !== (t_value = /*logo*/ ctx[0].title + "")) set_data(t, t_value);
+		},
+		d(detaching) {
+			if (detaching) detach(t);
+		}
+	};
+}
+
+// (147:6) {#if mobileNavOpen}
 function create_if_block(ctx) {
-	let header;
-	let div;
-	let t0;
-	let t1_value = /*selectedSport*/ ctx[1].sportname + "";
-	let t1;
-	let t2;
-	let t3;
-	let ul;
+	let nav;
+	let t;
+	let button;
+	let icon;
+	let nav_transition;
 	let current;
-	let each_value = /*selectedSport*/ ctx[1].availabletours;
+	let mounted;
+	let dispose;
+	let each_value = /*site_nav*/ ctx[2];
 	let each_blocks = [];
 
 	for (let i = 0; i < each_value.length; i += 1) {
 		each_blocks[i] = create_each_block(get_each_context(ctx, each_value, i));
 	}
 
-	const out = i => transition_out(each_blocks[i], 1, 1, () => {
-		each_blocks[i] = null;
-	});
+	icon = new Component$1({ props: { height: "25", icon: "bi:x-lg" } });
 
 	return {
 		c() {
-			header = element("header");
-			div = element("div");
-			t0 = text("destinazioni per ");
-			t1 = text(t1_value);
-			t2 = text(":");
-			t3 = space();
-			ul = element("ul");
+			nav = element("nav");
 
 			for (let i = 0; i < each_blocks.length; i += 1) {
 				each_blocks[i].c();
 			}
 
+			t = space();
+			button = element("button");
+			create_component(icon.$$.fragment);
 			this.h();
 		},
 		l(nodes) {
-			header = claim_element(nodes, "HEADER", { class: true });
-			var header_nodes = children(header);
-			div = claim_element(header_nodes, "DIV", { class: true });
-			var div_nodes = children(div);
-			t0 = claim_text(div_nodes, "destinazioni per ");
-			t1 = claim_text(div_nodes, t1_value);
-			t2 = claim_text(div_nodes, ":");
-			div_nodes.forEach(detach);
-			header_nodes.forEach(detach);
-			t3 = claim_space(nodes);
-			ul = claim_element(nodes, "UL", { class: true });
-			var ul_nodes = children(ul);
+			nav = claim_element(nodes, "NAV", { id: true, class: true });
+			var nav_nodes = children(nav);
 
 			for (let i = 0; i < each_blocks.length; i += 1) {
-				each_blocks[i].l(ul_nodes);
+				each_blocks[i].l(nav_nodes);
 			}
 
-			ul_nodes.forEach(detach);
+			t = claim_space(nav_nodes);
+
+			button = claim_element(nav_nodes, "BUTTON", {
+				id: true,
+				"aria-label": true,
+				class: true
+			});
+
+			var button_nodes = children(button);
+			claim_component(icon.$$.fragment, button_nodes);
+			button_nodes.forEach(detach);
+			nav_nodes.forEach(detach);
 			this.h();
 		},
 		h() {
-			attr(div, "class", "superhead");
-			attr(header, "class", "heading-group");
-			attr(ul, "class", "svelte-10dwopc");
+			attr(button, "id", "close");
+			attr(button, "aria-label", "Close Navigation");
+			attr(button, "class", "svelte-19bt6nw");
+			attr(nav, "id", "popup");
+			attr(nav, "class", "svelte-19bt6nw");
 		},
 		m(target, anchor) {
-			insert_hydration(target, header, anchor);
-			append_hydration(header, div);
-			append_hydration(div, t0);
-			append_hydration(div, t1);
-			append_hydration(div, t2);
-			insert_hydration(target, t3, anchor);
-			insert_hydration(target, ul, anchor);
+			insert_hydration(target, nav, anchor);
 
 			for (let i = 0; i < each_blocks.length; i += 1) {
 				if (each_blocks[i]) {
-					each_blocks[i].m(ul, null);
+					each_blocks[i].m(nav, null);
 				}
 			}
 
+			append_hydration(nav, t);
+			append_hydration(nav, button);
+			mount_component(icon, button, null);
 			current = true;
+
+			if (!mounted) {
+				dispose = listen(button, "click", /*click_handler_1*/ ctx[7]);
+				mounted = true;
+			}
 		},
 		p(ctx, dirty) {
-			if ((!current || dirty & /*selectedSport*/ 2) && t1_value !== (t1_value = /*selectedSport*/ ctx[1].sportname + "")) set_data(t1, t1_value);
-
-			if (dirty & /*selectedSport, selectedTour*/ 6) {
-				each_value = /*selectedSport*/ ctx[1].availabletours;
+			if (dirty & /*site_nav*/ 4) {
+				each_value = /*site_nav*/ ctx[2];
 				let i;
 
 				for (i = 0; i < each_value.length; i += 1) {
@@ -2972,402 +3317,291 @@ function create_if_block(ctx) {
 
 					if (each_blocks[i]) {
 						each_blocks[i].p(child_ctx, dirty);
-						transition_in(each_blocks[i], 1);
 					} else {
 						each_blocks[i] = create_each_block(child_ctx);
 						each_blocks[i].c();
-						transition_in(each_blocks[i], 1);
-						each_blocks[i].m(ul, null);
+						each_blocks[i].m(nav, t);
 					}
 				}
 
-				group_outros();
-
-				for (i = each_value.length; i < each_blocks.length; i += 1) {
-					out(i);
+				for (; i < each_blocks.length; i += 1) {
+					each_blocks[i].d(1);
 				}
 
-				check_outros();
-			}
-		},
-		i(local) {
-			if (current) return;
-
-			for (let i = 0; i < each_value.length; i += 1) {
-				transition_in(each_blocks[i]);
-			}
-
-			current = true;
-		},
-		o(local) {
-			each_blocks = each_blocks.filter(Boolean);
-
-			for (let i = 0; i < each_blocks.length; i += 1) {
-				transition_out(each_blocks[i]);
-			}
-
-			current = false;
-		},
-		d(detaching) {
-			if (detaching) detach(header);
-			if (detaching) detach(t3);
-			if (detaching) detach(ul);
-			destroy_each(each_blocks, detaching);
-		}
-	};
-}
-
-// (104:6) {#if selectedTour?.tourname===tourname}
-function create_if_block_1(ctx) {
-	let if_block_anchor;
-	let current;
-	let if_block = /*tourlink*/ ctx[7].url && create_if_block_2(ctx);
-
-	return {
-		c() {
-			if (if_block) if_block.c();
-			if_block_anchor = empty();
-		},
-		l(nodes) {
-			if (if_block) if_block.l(nodes);
-			if_block_anchor = empty();
-		},
-		m(target, anchor) {
-			if (if_block) if_block.m(target, anchor);
-			insert_hydration(target, if_block_anchor, anchor);
-			current = true;
-		},
-		p(ctx, dirty) {
-			if (/*tourlink*/ ctx[7].url) {
-				if (if_block) {
-					if_block.p(ctx, dirty);
-
-					if (dirty & /*selectedSport*/ 2) {
-						transition_in(if_block, 1);
-					}
-				} else {
-					if_block = create_if_block_2(ctx);
-					if_block.c();
-					transition_in(if_block, 1);
-					if_block.m(if_block_anchor.parentNode, if_block_anchor);
-				}
-			} else if (if_block) {
-				group_outros();
-
-				transition_out(if_block, 1, 1, () => {
-					if_block = null;
-				});
-
-				check_outros();
-			}
-		},
-		i(local) {
-			if (current) return;
-			transition_in(if_block);
-			current = true;
-		},
-		o(local) {
-			transition_out(if_block);
-			current = false;
-		},
-		d(detaching) {
-			if (if_block) if_block.d(detaching);
-			if (detaching) detach(if_block_anchor);
-		}
-	};
-}
-
-// (105:8) {#if tourlink.url}
-function create_if_block_2(ctx) {
-	let div1;
-	let p;
-	let t0;
-	let t1;
-	let a;
-	let t2_value = /*tourlink*/ ctx[7].label + "";
-	let t2;
-	let t3;
-	let div0;
-	let icon;
-	let a_href_value;
-	let t4;
-	let current;
-
-	icon = new Component$1({
-			props: { icon: "akar-icons:arrow-right" }
-		});
-
-	return {
-		c() {
-			div1 = element("div");
-			p = element("p");
-			t0 = text("Για να μάθεις την τιμή του πακέτου παρακαλώ επικοινώνησε μαζί μας !");
-			t1 = space();
-			a = element("a");
-			t2 = text(t2_value);
-			t3 = space();
-			div0 = element("div");
-			create_component(icon.$$.fragment);
-			t4 = space();
-			this.h();
-		},
-		l(nodes) {
-			div1 = claim_element(nodes, "DIV", { style: true });
-			var div1_nodes = children(div1);
-			p = claim_element(div1_nodes, "P", {});
-			var p_nodes = children(p);
-			t0 = claim_text(p_nodes, "Για να μάθεις την τιμή του πακέτου παρακαλώ επικοινώνησε μαζί μας !");
-			p_nodes.forEach(detach);
-			t1 = claim_space(div1_nodes);
-			a = claim_element(div1_nodes, "A", { class: true, href: true });
-			var a_nodes = children(a);
-			t2 = claim_text(a_nodes, t2_value);
-			t3 = claim_space(a_nodes);
-			div0 = claim_element(a_nodes, "DIV", { class: true });
-			var div0_nodes = children(div0);
-			claim_component(icon.$$.fragment, div0_nodes);
-			div0_nodes.forEach(detach);
-			a_nodes.forEach(detach);
-			t4 = claim_space(div1_nodes);
-			div1_nodes.forEach(detach);
-			this.h();
-		},
-		h() {
-			attr(div0, "class", "arrow");
-			attr(a, "class", "link svelte-10dwopc");
-			attr(a, "href", a_href_value = /*tourlink*/ ctx[7].url);
-			set_style(div1, "display", "flex");
-			set_style(div1, "align-items", "center");
-			set_style(div1, "flex-direction", "column");
-		},
-		m(target, anchor) {
-			insert_hydration(target, div1, anchor);
-			append_hydration(div1, p);
-			append_hydration(p, t0);
-			append_hydration(div1, t1);
-			append_hydration(div1, a);
-			append_hydration(a, t2);
-			append_hydration(a, t3);
-			append_hydration(a, div0);
-			mount_component(icon, div0, null);
-			append_hydration(div1, t4);
-			current = true;
-		},
-		p(ctx, dirty) {
-			if ((!current || dirty & /*selectedSport*/ 2) && t2_value !== (t2_value = /*tourlink*/ ctx[7].label + "")) set_data(t2, t2_value);
-
-			if (!current || dirty & /*selectedSport*/ 2 && a_href_value !== (a_href_value = /*tourlink*/ ctx[7].url)) {
-				attr(a, "href", a_href_value);
+				each_blocks.length = each_value.length;
 			}
 		},
 		i(local) {
 			if (current) return;
 			transition_in(icon.$$.fragment, local);
+
+			add_render_callback(() => {
+				if (!current) return;
+				if (!nav_transition) nav_transition = create_bidirectional_transition(nav, fade, { duration: 200 }, true);
+				nav_transition.run(1);
+			});
+
 			current = true;
 		},
 		o(local) {
 			transition_out(icon.$$.fragment, local);
+			if (!nav_transition) nav_transition = create_bidirectional_transition(nav, fade, { duration: 200 }, false);
+			nav_transition.run(0);
 			current = false;
 		},
 		d(detaching) {
-			if (detaching) detach(div1);
+			if (detaching) detach(nav);
+			destroy_each(each_blocks, detaching);
 			destroy_component(icon);
-		}
-	};
-}
-
-// (98:6) {#each selectedSport.availabletours as {tourlink,tourname}}
-function create_each_block(ctx) {
-	let li;
-	let button;
-	let t0_value = /*tourname*/ ctx[8] + "";
-	let t0;
-	let t1;
-	let if_block_anchor;
-	let current;
-	let mounted;
-	let dispose;
-
-	function click_handler_1() {
-		return /*click_handler_1*/ ctx[5](/*tourlink*/ ctx[7], /*tourname*/ ctx[8]);
-	}
-
-	let if_block = /*selectedTour*/ ctx[2]?.tourname === /*tourname*/ ctx[8] && create_if_block_1(ctx);
-
-	return {
-		c() {
-			li = element("li");
-			button = element("button");
-			t0 = text(t0_value);
-			t1 = space();
-			if (if_block) if_block.c();
-			if_block_anchor = empty();
-			this.h();
-		},
-		l(nodes) {
-			li = claim_element(nodes, "LI", { class: true });
-			var li_nodes = children(li);
-			button = claim_element(li_nodes, "BUTTON", { class: true });
-			var button_nodes = children(button);
-			t0 = claim_text(button_nodes, t0_value);
-			button_nodes.forEach(detach);
-			li_nodes.forEach(detach);
-			t1 = claim_space(nodes);
-			if (if_block) if_block.l(nodes);
-			if_block_anchor = empty();
-			this.h();
-		},
-		h() {
-			attr(button, "class", "svelte-10dwopc");
-			attr(li, "class", "svelte-10dwopc");
-		},
-		m(target, anchor) {
-			insert_hydration(target, li, anchor);
-			append_hydration(li, button);
-			append_hydration(button, t0);
-			insert_hydration(target, t1, anchor);
-			if (if_block) if_block.m(target, anchor);
-			insert_hydration(target, if_block_anchor, anchor);
-			current = true;
-
-			if (!mounted) {
-				dispose = listen(button, "click", click_handler_1);
-				mounted = true;
-			}
-		},
-		p(new_ctx, dirty) {
-			ctx = new_ctx;
-			if ((!current || dirty & /*selectedSport*/ 2) && t0_value !== (t0_value = /*tourname*/ ctx[8] + "")) set_data(t0, t0_value);
-
-			if (/*selectedTour*/ ctx[2]?.tourname === /*tourname*/ ctx[8]) {
-				if (if_block) {
-					if_block.p(ctx, dirty);
-
-					if (dirty & /*selectedTour, selectedSport*/ 6) {
-						transition_in(if_block, 1);
-					}
-				} else {
-					if_block = create_if_block_1(ctx);
-					if_block.c();
-					transition_in(if_block, 1);
-					if_block.m(if_block_anchor.parentNode, if_block_anchor);
-				}
-			} else if (if_block) {
-				group_outros();
-
-				transition_out(if_block, 1, 1, () => {
-					if_block = null;
-				});
-
-				check_outros();
-			}
-		},
-		i(local) {
-			if (current) return;
-			transition_in(if_block);
-			current = true;
-		},
-		o(local) {
-			transition_out(if_block);
-			current = false;
-		},
-		d(detaching) {
-			if (detaching) detach(li);
-			if (detaching) detach(t1);
-			if (if_block) if_block.d(detaching);
-			if (detaching) detach(if_block_anchor);
+			if (detaching && nav_transition) nav_transition.end();
 			mounted = false;
 			dispose();
 		}
 	};
 }
 
+// (149:10) {#each site_nav as { link }}
+function create_each_block(ctx) {
+	let a;
+	let t_value = /*link*/ ctx[9].label + "";
+	let t;
+	let a_href_value;
+
+	return {
+		c() {
+			a = element("a");
+			t = text(t_value);
+			this.h();
+		},
+		l(nodes) {
+			a = claim_element(nodes, "A", { href: true });
+			var a_nodes = children(a);
+			t = claim_text(a_nodes, t_value);
+			a_nodes.forEach(detach);
+			this.h();
+		},
+		h() {
+			attr(a, "href", a_href_value = /*link*/ ctx[9].url);
+		},
+		m(target, anchor) {
+			insert_hydration(target, a, anchor);
+			append_hydration(a, t);
+		},
+		p(ctx, dirty) {
+			if (dirty & /*site_nav*/ 4 && t_value !== (t_value = /*link*/ ctx[9].label + "")) set_data(t, t_value);
+
+			if (dirty & /*site_nav*/ 4 && a_href_value !== (a_href_value = /*link*/ ctx[9].url)) {
+				attr(a, "href", a_href_value);
+			}
+		},
+		d(detaching) {
+			if (detaching) detach(a);
+		}
+	};
+}
+
 function create_fragment(ctx) {
-	let section;
-	let div;
-	let h2;
+	let header;
+	let div2;
+	let div0;
+	let a0;
 	let t0;
+	let nav;
 	let t1;
-	let ul;
+	let div1;
+	let a1;
 	let t2;
+	let button;
+	let icon;
+	let t3;
+	let t4;
+	let div3;
+	let h1;
+	let t5;
+	let header_aria_label_value;
 	let current;
-	let each_value_1 = /*sports*/ ctx[0];
+	let mounted;
+	let dispose;
+
+	function select_block_type(ctx, dirty) {
+		if (/*logo*/ ctx[0].title) return create_if_block_3;
+		if (/*logo*/ ctx[0].image.url) return create_if_block_4;
+	}
+
+	let current_block_type = select_block_type(ctx);
+	let if_block0 = current_block_type && current_block_type(ctx);
+	let each_value_1 = /*site_nav*/ ctx[2];
 	let each_blocks = [];
 
 	for (let i = 0; i < each_value_1.length; i += 1) {
 		each_blocks[i] = create_each_block_1(get_each_context_1(ctx, each_value_1, i));
 	}
 
-	let if_block = /*selectedSport*/ ctx[1] && create_if_block(ctx);
+	function select_block_type_1(ctx, dirty) {
+		if (/*logo*/ ctx[0].title) return create_if_block_1;
+		if (/*logo*/ ctx[0].image.url) return create_if_block_2;
+	}
+
+	let current_block_type_1 = select_block_type_1(ctx);
+	let if_block1 = current_block_type_1 && current_block_type_1(ctx);
+
+	icon = new Component$1({
+			props: { height: "30", icon: "eva:menu-outline" }
+		});
+
+	let if_block2 = /*mobileNavOpen*/ ctx[4] && create_if_block(ctx);
 
 	return {
 		c() {
-			section = element("section");
-			div = element("div");
-			h2 = element("h2");
-			t0 = text("Scegli uno sport:");
-			t1 = space();
-			ul = element("ul");
+			header = element("header");
+			div2 = element("div");
+			div0 = element("div");
+			a0 = element("a");
+			if (if_block0) if_block0.c();
+			t0 = space();
+			nav = element("nav");
 
 			for (let i = 0; i < each_blocks.length; i += 1) {
 				each_blocks[i].c();
 			}
 
+			t1 = space();
+			div1 = element("div");
+			a1 = element("a");
+			if (if_block1) if_block1.c();
 			t2 = space();
-			if (if_block) if_block.c();
+			button = element("button");
+			create_component(icon.$$.fragment);
+			t3 = space();
+			if (if_block2) if_block2.c();
+			t4 = space();
+			div3 = element("div");
+			h1 = element("h1");
+			t5 = text(/*headline*/ ctx[1]);
 			this.h();
 		},
 		l(nodes) {
-			section = claim_element(nodes, "SECTION", { class: true });
-			var section_nodes = children(section);
-			div = claim_element(section_nodes, "DIV", { class: true });
-			var div_nodes = children(div);
-			h2 = claim_element(div_nodes, "H2", { class: true });
-			var h2_nodes = children(h2);
-			t0 = claim_text(h2_nodes, "Scegli uno sport:");
-			h2_nodes.forEach(detach);
-			t1 = claim_space(div_nodes);
-			ul = claim_element(div_nodes, "UL", { class: true });
-			var ul_nodes = children(ul);
+			header = claim_element(nodes, "HEADER", {
+				style: true,
+				role: true,
+				"aria-label": true,
+				class: true
+			});
+
+			var header_nodes = children(header);
+			div2 = claim_element(header_nodes, "DIV", { class: true });
+			var div2_nodes = children(div2);
+			div0 = claim_element(div2_nodes, "DIV", { class: true });
+			var div0_nodes = children(div0);
+			a0 = claim_element(div0_nodes, "A", { href: true, class: true });
+			var a0_nodes = children(a0);
+			if (if_block0) if_block0.l(a0_nodes);
+			a0_nodes.forEach(detach);
+			t0 = claim_space(div0_nodes);
+			nav = claim_element(div0_nodes, "NAV", { class: true });
+			var nav_nodes = children(nav);
 
 			for (let i = 0; i < each_blocks.length; i += 1) {
-				each_blocks[i].l(ul_nodes);
+				each_blocks[i].l(nav_nodes);
 			}
 
-			ul_nodes.forEach(detach);
-			t2 = claim_space(div_nodes);
-			if (if_block) if_block.l(div_nodes);
-			div_nodes.forEach(detach);
-			section_nodes.forEach(detach);
+			nav_nodes.forEach(detach);
+			div0_nodes.forEach(detach);
+			t1 = claim_space(div2_nodes);
+			div1 = claim_element(div2_nodes, "DIV", { class: true });
+			var div1_nodes = children(div1);
+			a1 = claim_element(div1_nodes, "A", { href: true, class: true });
+			var a1_nodes = children(a1);
+			if (if_block1) if_block1.l(a1_nodes);
+			a1_nodes.forEach(detach);
+			t2 = claim_space(div1_nodes);
+			button = claim_element(div1_nodes, "BUTTON", { id: true, "aria-label": true });
+			var button_nodes = children(button);
+			claim_component(icon.$$.fragment, button_nodes);
+			button_nodes.forEach(detach);
+			t3 = claim_space(div1_nodes);
+			if (if_block2) if_block2.l(div1_nodes);
+			div1_nodes.forEach(detach);
+			div2_nodes.forEach(detach);
+			t4 = claim_space(header_nodes);
+			div3 = claim_element(header_nodes, "DIV", { class: true });
+			var div3_nodes = children(div3);
+			h1 = claim_element(div3_nodes, "H1", { class: true });
+			var h1_nodes = children(h1);
+			t5 = claim_text(h1_nodes, /*headline*/ ctx[1]);
+			h1_nodes.forEach(detach);
+			div3_nodes.forEach(detach);
+			header_nodes.forEach(detach);
 			this.h();
 		},
 		h() {
-			attr(h2, "class", "heading svelte-10dwopc");
-			attr(ul, "class", "svelte-10dwopc");
-			attr(div, "class", "card svelte-10dwopc");
-			attr(section, "class", "section-container svelte-10dwopc");
+			attr(a0, "href", "/");
+			attr(a0, "class", "logo svelte-19bt6nw");
+			attr(nav, "class", "svelte-19bt6nw");
+			attr(div0, "class", "desktop-nav svelte-19bt6nw");
+			attr(a1, "href", "/");
+			attr(a1, "class", "logo svelte-19bt6nw");
+			attr(button, "id", "open");
+			attr(button, "aria-label", "Open mobile navigation");
+			attr(div1, "class", "mobile-nav svelte-19bt6nw");
+			attr(div2, "class", "section-container svelte-19bt6nw");
+			attr(h1, "class", "headline svelte-19bt6nw");
+			attr(div3, "class", "section-container svelte-19bt6nw");
+			set_style(header, "background-image", "url('" + /*background*/ ctx[3].url + "')");
+			attr(header, "role", "img");
+			attr(header, "aria-label", header_aria_label_value = /*background*/ ctx[3].alt);
+			attr(header, "class", "svelte-19bt6nw");
 		},
 		m(target, anchor) {
-			insert_hydration(target, section, anchor);
-			append_hydration(section, div);
-			append_hydration(div, h2);
-			append_hydration(h2, t0);
-			append_hydration(div, t1);
-			append_hydration(div, ul);
+			insert_hydration(target, header, anchor);
+			append_hydration(header, div2);
+			append_hydration(div2, div0);
+			append_hydration(div0, a0);
+			if (if_block0) if_block0.m(a0, null);
+			append_hydration(div0, t0);
+			append_hydration(div0, nav);
 
 			for (let i = 0; i < each_blocks.length; i += 1) {
 				if (each_blocks[i]) {
-					each_blocks[i].m(ul, null);
+					each_blocks[i].m(nav, null);
 				}
 			}
 
-			append_hydration(div, t2);
-			if (if_block) if_block.m(div, null);
+			append_hydration(div2, t1);
+			append_hydration(div2, div1);
+			append_hydration(div1, a1);
+			if (if_block1) if_block1.m(a1, null);
+			append_hydration(div1, t2);
+			append_hydration(div1, button);
+			mount_component(icon, button, null);
+			append_hydration(div1, t3);
+			if (if_block2) if_block2.m(div1, null);
+			append_hydration(header, t4);
+			append_hydration(header, div3);
+			append_hydration(div3, h1);
+			append_hydration(h1, t5);
 			current = true;
+
+			if (!mounted) {
+				dispose = listen(button, "click", /*click_handler*/ ctx[6]);
+				mounted = true;
+			}
 		},
 		p(ctx, [dirty]) {
-			if (dirty & /*selectedSport, sports*/ 3) {
-				each_value_1 = /*sports*/ ctx[0];
+			if (current_block_type === (current_block_type = select_block_type(ctx)) && if_block0) {
+				if_block0.p(ctx, dirty);
+			} else {
+				if (if_block0) if_block0.d(1);
+				if_block0 = current_block_type && current_block_type(ctx);
+
+				if (if_block0) {
+					if_block0.c();
+					if_block0.m(a0, null);
+				}
+			}
+
+			if (dirty & /*site_nav, window*/ 4) {
+				each_value_1 = /*site_nav*/ ctx[2];
 				let i;
 
 				for (i = 0; i < each_value_1.length; i += 1) {
@@ -3378,7 +3612,7 @@ function create_fragment(ctx) {
 					} else {
 						each_blocks[i] = create_each_block_1(child_ctx);
 						each_blocks[i].c();
-						each_blocks[i].m(ul, null);
+						each_blocks[i].m(nav, null);
 					}
 				}
 
@@ -3389,77 +3623,125 @@ function create_fragment(ctx) {
 				each_blocks.length = each_value_1.length;
 			}
 
-			if (/*selectedSport*/ ctx[1]) {
-				if (if_block) {
-					if_block.p(ctx, dirty);
+			if (current_block_type_1 === (current_block_type_1 = select_block_type_1(ctx)) && if_block1) {
+				if_block1.p(ctx, dirty);
+			} else {
+				if (if_block1) if_block1.d(1);
+				if_block1 = current_block_type_1 && current_block_type_1(ctx);
 
-					if (dirty & /*selectedSport*/ 2) {
-						transition_in(if_block, 1);
+				if (if_block1) {
+					if_block1.c();
+					if_block1.m(a1, null);
+				}
+			}
+
+			if (/*mobileNavOpen*/ ctx[4]) {
+				if (if_block2) {
+					if_block2.p(ctx, dirty);
+
+					if (dirty & /*mobileNavOpen*/ 16) {
+						transition_in(if_block2, 1);
 					}
 				} else {
-					if_block = create_if_block(ctx);
-					if_block.c();
-					transition_in(if_block, 1);
-					if_block.m(div, null);
+					if_block2 = create_if_block(ctx);
+					if_block2.c();
+					transition_in(if_block2, 1);
+					if_block2.m(div1, null);
 				}
-			} else if (if_block) {
+			} else if (if_block2) {
 				group_outros();
 
-				transition_out(if_block, 1, 1, () => {
-					if_block = null;
+				transition_out(if_block2, 1, 1, () => {
+					if_block2 = null;
 				});
 
 				check_outros();
 			}
+
+			if (!current || dirty & /*headline*/ 2) set_data(t5, /*headline*/ ctx[1]);
+
+			if (!current || dirty & /*background*/ 8) {
+				set_style(header, "background-image", "url('" + /*background*/ ctx[3].url + "')");
+			}
+
+			if (!current || dirty & /*background*/ 8 && header_aria_label_value !== (header_aria_label_value = /*background*/ ctx[3].alt)) {
+				attr(header, "aria-label", header_aria_label_value);
+			}
 		},
 		i(local) {
 			if (current) return;
-			transition_in(if_block);
+			transition_in(icon.$$.fragment, local);
+			transition_in(if_block2);
 			current = true;
 		},
 		o(local) {
-			transition_out(if_block);
+			transition_out(icon.$$.fragment, local);
+			transition_out(if_block2);
 			current = false;
 		},
 		d(detaching) {
-			if (detaching) detach(section);
+			if (detaching) detach(header);
+
+			if (if_block0) {
+				if_block0.d();
+			}
+
 			destroy_each(each_blocks, detaching);
-			if (if_block) if_block.d();
+
+			if (if_block1) {
+				if_block1.d();
+			}
+
+			destroy_component(icon);
+			if (if_block2) if_block2.d();
+			mounted = false;
+			dispose();
 		}
 	};
 }
 
 function instance($$self, $$props, $$invalidate) {
 	let { props } = $$props;
-	let { sports } = $$props;
-	let selectedSport = null;
-	let selectedTour = null;
+	let { logo } = $$props;
+	let { headline } = $$props;
+	let { site_nav } = $$props;
+	let { background } = $$props;
+	let mobileNavOpen = false;
 
-	function onSelectedSportModification(newSelectedSport) {
-		$$invalidate(2, selectedTour = null);
-	}
-
-	const click_handler = (sportname, availabletours) => $$invalidate(1, selectedSport = { sportname, availabletours });
-	const click_handler_1 = (tourlink, tourname) => $$invalidate(2, selectedTour = { tourlink, tourname });
+	const click_handler = () => $$invalidate(4, mobileNavOpen = true);
+	const click_handler_1 = () => $$invalidate(4, mobileNavOpen = false);
 
 	$$self.$$set = $$props => {
-		if ('props' in $$props) $$invalidate(3, props = $$props.props);
-		if ('sports' in $$props) $$invalidate(0, sports = $$props.sports);
+		if ('props' in $$props) $$invalidate(5, props = $$props.props);
+		if ('logo' in $$props) $$invalidate(0, logo = $$props.logo);
+		if ('headline' in $$props) $$invalidate(1, headline = $$props.headline);
+		if ('site_nav' in $$props) $$invalidate(2, site_nav = $$props.site_nav);
+		if ('background' in $$props) $$invalidate(3, background = $$props.background);
 	};
 
-	$$self.$$.update = () => {
-		if ($$self.$$.dirty & /*selectedSport*/ 2) {
-			onSelectedSportModification();
-		}
-	};
-
-	return [sports, selectedSport, selectedTour, props, click_handler, click_handler_1];
+	return [
+		logo,
+		headline,
+		site_nav,
+		background,
+		mobileNavOpen,
+		props,
+		click_handler,
+		click_handler_1
+	];
 }
 
 class Component extends SvelteComponent {
 	constructor(options) {
 		super();
-		init(this, options, instance, create_fragment, safe_not_equal, { props: 3, sports: 0 });
+
+		init(this, options, instance, create_fragment, safe_not_equal, {
+			props: 5,
+			logo: 0,
+			headline: 1,
+			site_nav: 2,
+			background: 3
+		});
 	}
 }
 
