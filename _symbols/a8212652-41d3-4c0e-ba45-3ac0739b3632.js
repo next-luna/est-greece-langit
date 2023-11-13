@@ -1,4 +1,4 @@
-// Featured People - Updated November 13, 2023
+// Choose tour - Updated November 13, 2023
 function noop() { }
 function assign(tar, src) {
     // @ts-ignore
@@ -21,14 +21,6 @@ function is_function(thing) {
 function safe_not_equal(a, b) {
     return a != a ? b == b : a !== b || ((a && typeof a === 'object') || typeof a === 'function');
 }
-let src_url_equal_anchor;
-function src_url_equal(element_src, url) {
-    if (!src_url_equal_anchor) {
-        src_url_equal_anchor = document.createElement('a');
-    }
-    src_url_equal_anchor.href = url;
-    return element_src === src_url_equal_anchor.href;
-}
 function is_empty(obj) {
     return Object.keys(obj).length === 0;
 }
@@ -38,6 +30,9 @@ function exclude_internal_props(props) {
         if (k[0] !== '$')
             result[k] = props[k];
     return result;
+}
+function null_to_empty(value) {
+    return value == null ? '' : value;
 }
 
 // Track which nodes are claimed during hydration. Unclaimed nodes can then be removed from the DOM
@@ -199,6 +194,10 @@ function space() {
 function empty() {
     return text('');
 }
+function listen(node, event, handler, options) {
+    node.addEventListener(event, handler, options);
+    return () => node.removeEventListener(event, handler, options);
+}
 function attr(node, attribute, value) {
     if (value == null)
         node.removeAttribute(attribute);
@@ -338,6 +337,14 @@ function set_data(text, data) {
     if (text.data === data)
         return;
     text.data = data;
+}
+function set_style(node, key, value, important) {
+    if (value == null) {
+        node.style.removeProperty(key);
+    }
+    else {
+        node.style.setProperty(key, value, important ? 'important' : '');
+    }
 }
 function custom_event(type, detail, { bubbles = false, cancelable = false } = {}) {
     const e = document.createEvent('CustomEvent');
@@ -2540,7 +2547,7 @@ function create_if_block$1(ctx) {
 	let if_block_anchor;
 
 	function select_block_type(ctx, dirty) {
-		if (/*data*/ ctx[0].svg) return create_if_block_1;
+		if (/*data*/ ctx[0].svg) return create_if_block_1$1;
 		return create_else_block;
 	}
 
@@ -2616,7 +2623,7 @@ function create_else_block(ctx) {
 }
 
 // (109:1) {#if data.svg}
-function create_if_block_1(ctx) {
+function create_if_block_1$1(ctx) {
 	let svg;
 	let raw_value = /*data*/ ctx[0].body + "";
 	let svg_levels = [/*data*/ ctx[0].attributes];
@@ -2781,325 +2788,109 @@ let Component$1 = class Component extends SvelteComponent {
 
 function get_each_context(ctx, list, i) {
 	const child_ctx = ctx.slice();
-	child_ctx[3] = list[i];
+	child_ctx[7] = list[i].tourlink;
+	child_ctx[8] = list[i].tourname;
 	return child_ctx;
 }
 
 function get_each_context_1(ctx, list, i) {
 	const child_ctx = ctx.slice();
-	child_ctx[6] = list[i].link;
-	child_ctx[7] = list[i].icon;
+	child_ctx[11] = list[i].sportname;
+	child_ctx[12] = list[i].availabletours;
 	return child_ctx;
 }
 
-// (86:6) {#if person.image.url}
-function create_if_block(ctx) {
-	let figure;
-	let img;
-	let img_alt_value;
-	let img_src_value;
-
-	return {
-		c() {
-			figure = element("figure");
-			img = element("img");
-			this.h();
-		},
-		l(nodes) {
-			figure = claim_element(nodes, "FIGURE", { class: true });
-			var figure_nodes = children(figure);
-			img = claim_element(figure_nodes, "IMG", { alt: true, src: true, class: true });
-			figure_nodes.forEach(detach);
-			this.h();
-		},
-		h() {
-			attr(img, "alt", img_alt_value = /*person*/ ctx[3].image.alt);
-			if (!src_url_equal(img.src, img_src_value = /*person*/ ctx[3].image.url)) attr(img, "src", img_src_value);
-			attr(img, "class", "svelte-nec1em");
-			attr(figure, "class", "svelte-nec1em");
-		},
-		m(target, anchor) {
-			insert_hydration(target, figure, anchor);
-			append_hydration(figure, img);
-		},
-		p(ctx, dirty) {
-			if (dirty & /*people*/ 1 && img_alt_value !== (img_alt_value = /*person*/ ctx[3].image.alt)) {
-				attr(img, "alt", img_alt_value);
-			}
-
-			if (dirty & /*people*/ 1 && !src_url_equal(img.src, img_src_value = /*person*/ ctx[3].image.url)) {
-				attr(img, "src", img_src_value);
-			}
-		},
-		d(detaching) {
-			if (detaching) detach(figure);
-		}
-	};
-}
-
-// (97:10) {#each person.social_links as {link, icon}}
+// (84:6) {#each sports as {sportname,availabletours}}
 function create_each_block_1(ctx) {
-	let a;
-	let icon;
-	let t;
-	let a_href_value;
-	let a_aria_label_value;
-	let current;
-	icon = new Component$1({ props: { icon: /*icon*/ ctx[7] } });
-
-	return {
-		c() {
-			a = element("a");
-			create_component(icon.$$.fragment);
-			t = space();
-			this.h();
-		},
-		l(nodes) {
-			a = claim_element(nodes, "A", {
-				href: true,
-				"aria-label": true,
-				class: true
-			});
-
-			var a_nodes = children(a);
-			claim_component(icon.$$.fragment, a_nodes);
-			t = claim_space(a_nodes);
-			a_nodes.forEach(detach);
-			this.h();
-		},
-		h() {
-			attr(a, "href", a_href_value = /*link*/ ctx[6].url);
-			attr(a, "aria-label", a_aria_label_value = /*link*/ ctx[6].label);
-			attr(a, "class", "svelte-nec1em");
-		},
-		m(target, anchor) {
-			insert_hydration(target, a, anchor);
-			mount_component(icon, a, null);
-			append_hydration(a, t);
-			current = true;
-		},
-		p(ctx, dirty) {
-			const icon_changes = {};
-			if (dirty & /*people*/ 1) icon_changes.icon = /*icon*/ ctx[7];
-			icon.$set(icon_changes);
-
-			if (!current || dirty & /*people*/ 1 && a_href_value !== (a_href_value = /*link*/ ctx[6].url)) {
-				attr(a, "href", a_href_value);
-			}
-
-			if (!current || dirty & /*people*/ 1 && a_aria_label_value !== (a_aria_label_value = /*link*/ ctx[6].label)) {
-				attr(a, "aria-label", a_aria_label_value);
-			}
-		},
-		i(local) {
-			if (current) return;
-			transition_in(icon.$$.fragment, local);
-			current = true;
-		},
-		o(local) {
-			transition_out(icon.$$.fragment, local);
-			current = false;
-		},
-		d(detaching) {
-			if (detaching) detach(a);
-			destroy_component(icon);
-		}
-	};
-}
-
-// (84:4) {#each people as person}
-function create_each_block(ctx) {
 	let li;
+	let button;
+	let t0_value = /*sportname*/ ctx[11] + "";
 	let t0;
-	let div2;
-	let div0;
-	let span0;
-	let t1_value = /*person*/ ctx[3].name + "";
+	let button_class_value;
 	let t1;
-	let t2;
-	let span1;
-	let t3_value = /*person*/ ctx[3].title + "";
-	let t3;
-	let t4;
-	let div1;
-	let t5;
-	let current;
-	let if_block = /*person*/ ctx[3].image.url && create_if_block(ctx);
-	let each_value_1 = /*person*/ ctx[3].social_links;
-	let each_blocks = [];
+	let li_class_value;
+	let mounted;
+	let dispose;
 
-	for (let i = 0; i < each_value_1.length; i += 1) {
-		each_blocks[i] = create_each_block_1(get_each_context_1(ctx, each_value_1, i));
+	function click_handler() {
+		return /*click_handler*/ ctx[4](/*sportname*/ ctx[11], /*availabletours*/ ctx[12]);
 	}
-
-	const out = i => transition_out(each_blocks[i], 1, 1, () => {
-		each_blocks[i] = null;
-	});
 
 	return {
 		c() {
 			li = element("li");
-			if (if_block) if_block.c();
-			t0 = space();
-			div2 = element("div");
-			div0 = element("div");
-			span0 = element("span");
-			t1 = text(t1_value);
-			t2 = space();
-			span1 = element("span");
-			t3 = text(t3_value);
-			t4 = space();
-			div1 = element("div");
-
-			for (let i = 0; i < each_blocks.length; i += 1) {
-				each_blocks[i].c();
-			}
-
-			t5 = space();
+			button = element("button");
+			t0 = text(t0_value);
+			t1 = space();
 			this.h();
 		},
 		l(nodes) {
 			li = claim_element(nodes, "LI", { class: true });
 			var li_nodes = children(li);
-			if (if_block) if_block.l(li_nodes);
-			t0 = claim_space(li_nodes);
-			div2 = claim_element(li_nodes, "DIV", { class: true });
-			var div2_nodes = children(div2);
-			div0 = claim_element(div2_nodes, "DIV", { class: true });
-			var div0_nodes = children(div0);
-			span0 = claim_element(div0_nodes, "SPAN", { class: true });
-			var span0_nodes = children(span0);
-			t1 = claim_text(span0_nodes, t1_value);
-			span0_nodes.forEach(detach);
-			t2 = claim_space(div0_nodes);
-			span1 = claim_element(div0_nodes, "SPAN", { class: true });
-			var span1_nodes = children(span1);
-			t3 = claim_text(span1_nodes, t3_value);
-			span1_nodes.forEach(detach);
-			div0_nodes.forEach(detach);
-			t4 = claim_space(div2_nodes);
-			div1 = claim_element(div2_nodes, "DIV", { class: true });
-			var div1_nodes = children(div1);
-
-			for (let i = 0; i < each_blocks.length; i += 1) {
-				each_blocks[i].l(div1_nodes);
-			}
-
-			div1_nodes.forEach(detach);
-			div2_nodes.forEach(detach);
-			t5 = claim_space(li_nodes);
+			button = claim_element(li_nodes, "BUTTON", { class: true });
+			var button_nodes = children(button);
+			t0 = claim_text(button_nodes, t0_value);
+			button_nodes.forEach(detach);
+			t1 = claim_space(li_nodes);
 			li_nodes.forEach(detach);
 			this.h();
 		},
 		h() {
-			attr(span0, "class", "name svelte-nec1em");
-			attr(span1, "class", "title svelte-nec1em");
-			attr(div0, "class", "details svelte-nec1em");
-			attr(div1, "class", "social svelte-nec1em");
-			attr(div2, "class", "info");
-			attr(li, "class", "svelte-nec1em");
+			attr(button, "class", button_class_value = "" + (null_to_empty(/*selectedSport*/ ctx[1]?.sportname === /*sportname*/ ctx[11]
+			? "active"
+			: "") + " svelte-10dwopc"));
+
+			attr(li, "class", li_class_value = "" + (null_to_empty(/*selectedSport*/ ctx[1]?.sportname === /*sportname*/ ctx[11]
+			? "selected"
+			: "") + " svelte-10dwopc"));
 		},
 		m(target, anchor) {
 			insert_hydration(target, li, anchor);
-			if (if_block) if_block.m(li, null);
-			append_hydration(li, t0);
-			append_hydration(li, div2);
-			append_hydration(div2, div0);
-			append_hydration(div0, span0);
-			append_hydration(span0, t1);
-			append_hydration(div0, t2);
-			append_hydration(div0, span1);
-			append_hydration(span1, t3);
-			append_hydration(div2, t4);
-			append_hydration(div2, div1);
+			append_hydration(li, button);
+			append_hydration(button, t0);
+			append_hydration(li, t1);
 
-			for (let i = 0; i < each_blocks.length; i += 1) {
-				if (each_blocks[i]) {
-					each_blocks[i].m(div1, null);
-				}
-			}
-
-			append_hydration(li, t5);
-			current = true;
-		},
-		p(ctx, dirty) {
-			if (/*person*/ ctx[3].image.url) {
-				if (if_block) {
-					if_block.p(ctx, dirty);
-				} else {
-					if_block = create_if_block(ctx);
-					if_block.c();
-					if_block.m(li, t0);
-				}
-			} else if (if_block) {
-				if_block.d(1);
-				if_block = null;
-			}
-
-			if ((!current || dirty & /*people*/ 1) && t1_value !== (t1_value = /*person*/ ctx[3].name + "")) set_data(t1, t1_value);
-			if ((!current || dirty & /*people*/ 1) && t3_value !== (t3_value = /*person*/ ctx[3].title + "")) set_data(t3, t3_value);
-
-			if (dirty & /*people*/ 1) {
-				each_value_1 = /*person*/ ctx[3].social_links;
-				let i;
-
-				for (i = 0; i < each_value_1.length; i += 1) {
-					const child_ctx = get_each_context_1(ctx, each_value_1, i);
-
-					if (each_blocks[i]) {
-						each_blocks[i].p(child_ctx, dirty);
-						transition_in(each_blocks[i], 1);
-					} else {
-						each_blocks[i] = create_each_block_1(child_ctx);
-						each_blocks[i].c();
-						transition_in(each_blocks[i], 1);
-						each_blocks[i].m(div1, null);
-					}
-				}
-
-				group_outros();
-
-				for (i = each_value_1.length; i < each_blocks.length; i += 1) {
-					out(i);
-				}
-
-				check_outros();
+			if (!mounted) {
+				dispose = listen(button, "click", click_handler);
+				mounted = true;
 			}
 		},
-		i(local) {
-			if (current) return;
+		p(new_ctx, dirty) {
+			ctx = new_ctx;
+			if (dirty & /*sports*/ 1 && t0_value !== (t0_value = /*sportname*/ ctx[11] + "")) set_data(t0, t0_value);
 
-			for (let i = 0; i < each_value_1.length; i += 1) {
-				transition_in(each_blocks[i]);
+			if (dirty & /*selectedSport, sports*/ 3 && button_class_value !== (button_class_value = "" + (null_to_empty(/*selectedSport*/ ctx[1]?.sportname === /*sportname*/ ctx[11]
+			? "active"
+			: "") + " svelte-10dwopc"))) {
+				attr(button, "class", button_class_value);
 			}
 
-			current = true;
-		},
-		o(local) {
-			each_blocks = each_blocks.filter(Boolean);
-
-			for (let i = 0; i < each_blocks.length; i += 1) {
-				transition_out(each_blocks[i]);
+			if (dirty & /*selectedSport, sports*/ 3 && li_class_value !== (li_class_value = "" + (null_to_empty(/*selectedSport*/ ctx[1]?.sportname === /*sportname*/ ctx[11]
+			? "selected"
+			: "") + " svelte-10dwopc"))) {
+				attr(li, "class", li_class_value);
 			}
-
-			current = false;
 		},
 		d(detaching) {
 			if (detaching) detach(li);
-			if (if_block) if_block.d();
-			destroy_each(each_blocks, detaching);
+			mounted = false;
+			dispose();
 		}
 	};
 }
 
-function create_fragment(ctx) {
-	let section;
-	let h2;
+// (92:4) {#if selectedSport}
+function create_if_block(ctx) {
+	let header;
+	let div;
 	let t0;
+	let t1_value = /*selectedSport*/ ctx[1].sportname + "";
 	let t1;
+	let t2;
+	let t3;
 	let ul;
 	let current;
-	let each_value = /*people*/ ctx[0];
+	let each_value = /*selectedSport*/ ctx[1].availabletours;
 	let each_blocks = [];
 
 	for (let i = 0; i < each_value.length; i += 1) {
@@ -3112,10 +2903,12 @@ function create_fragment(ctx) {
 
 	return {
 		c() {
-			section = element("section");
-			h2 = element("h2");
-			t0 = text(/*heading*/ ctx[1]);
-			t1 = space();
+			header = element("header");
+			div = element("div");
+			t0 = text("destinazioni per ");
+			t1 = text(t1_value);
+			t2 = text(":");
+			t3 = space();
 			ul = element("ul");
 
 			for (let i = 0; i < each_blocks.length; i += 1) {
@@ -3125,14 +2918,17 @@ function create_fragment(ctx) {
 			this.h();
 		},
 		l(nodes) {
-			section = claim_element(nodes, "SECTION", { class: true });
-			var section_nodes = children(section);
-			h2 = claim_element(section_nodes, "H2", { class: true });
-			var h2_nodes = children(h2);
-			t0 = claim_text(h2_nodes, /*heading*/ ctx[1]);
-			h2_nodes.forEach(detach);
-			t1 = claim_space(section_nodes);
-			ul = claim_element(section_nodes, "UL", { class: true });
+			header = claim_element(nodes, "HEADER", { class: true });
+			var header_nodes = children(header);
+			div = claim_element(header_nodes, "DIV", { class: true });
+			var div_nodes = children(div);
+			t0 = claim_text(div_nodes, "destinazioni per ");
+			t1 = claim_text(div_nodes, t1_value);
+			t2 = claim_text(div_nodes, ":");
+			div_nodes.forEach(detach);
+			header_nodes.forEach(detach);
+			t3 = claim_space(nodes);
+			ul = claim_element(nodes, "UL", { class: true });
 			var ul_nodes = children(ul);
 
 			for (let i = 0; i < each_blocks.length; i += 1) {
@@ -3140,20 +2936,21 @@ function create_fragment(ctx) {
 			}
 
 			ul_nodes.forEach(detach);
-			section_nodes.forEach(detach);
 			this.h();
 		},
 		h() {
-			attr(h2, "class", "heading svelte-nec1em");
-			attr(ul, "class", "cards svelte-nec1em");
-			attr(section, "class", "section-container svelte-nec1em");
+			attr(div, "class", "superhead");
+			attr(header, "class", "heading-group");
+			attr(ul, "class", "svelte-10dwopc");
 		},
 		m(target, anchor) {
-			insert_hydration(target, section, anchor);
-			append_hydration(section, h2);
-			append_hydration(h2, t0);
-			append_hydration(section, t1);
-			append_hydration(section, ul);
+			insert_hydration(target, header, anchor);
+			append_hydration(header, div);
+			append_hydration(div, t0);
+			append_hydration(div, t1);
+			append_hydration(div, t2);
+			insert_hydration(target, t3, anchor);
+			insert_hydration(target, ul, anchor);
 
 			for (let i = 0; i < each_blocks.length; i += 1) {
 				if (each_blocks[i]) {
@@ -3163,11 +2960,11 @@ function create_fragment(ctx) {
 
 			current = true;
 		},
-		p(ctx, [dirty]) {
-			if (!current || dirty & /*heading*/ 2) set_data(t0, /*heading*/ ctx[1]);
+		p(ctx, dirty) {
+			if ((!current || dirty & /*selectedSport*/ 2) && t1_value !== (t1_value = /*selectedSport*/ ctx[1].sportname + "")) set_data(t1, t1_value);
 
-			if (dirty & /*people*/ 1) {
-				each_value = /*people*/ ctx[0];
+			if (dirty & /*selectedSport, selectedTour*/ 6) {
+				each_value = /*selectedSport*/ ctx[1].availabletours;
 				let i;
 
 				for (i = 0; i < each_value.length; i += 1) {
@@ -3212,30 +3009,457 @@ function create_fragment(ctx) {
 			current = false;
 		},
 		d(detaching) {
+			if (detaching) detach(header);
+			if (detaching) detach(t3);
+			if (detaching) detach(ul);
+			destroy_each(each_blocks, detaching);
+		}
+	};
+}
+
+// (104:6) {#if selectedTour?.tourname===tourname}
+function create_if_block_1(ctx) {
+	let if_block_anchor;
+	let current;
+	let if_block = /*tourlink*/ ctx[7].url && create_if_block_2(ctx);
+
+	return {
+		c() {
+			if (if_block) if_block.c();
+			if_block_anchor = empty();
+		},
+		l(nodes) {
+			if (if_block) if_block.l(nodes);
+			if_block_anchor = empty();
+		},
+		m(target, anchor) {
+			if (if_block) if_block.m(target, anchor);
+			insert_hydration(target, if_block_anchor, anchor);
+			current = true;
+		},
+		p(ctx, dirty) {
+			if (/*tourlink*/ ctx[7].url) {
+				if (if_block) {
+					if_block.p(ctx, dirty);
+
+					if (dirty & /*selectedSport*/ 2) {
+						transition_in(if_block, 1);
+					}
+				} else {
+					if_block = create_if_block_2(ctx);
+					if_block.c();
+					transition_in(if_block, 1);
+					if_block.m(if_block_anchor.parentNode, if_block_anchor);
+				}
+			} else if (if_block) {
+				group_outros();
+
+				transition_out(if_block, 1, 1, () => {
+					if_block = null;
+				});
+
+				check_outros();
+			}
+		},
+		i(local) {
+			if (current) return;
+			transition_in(if_block);
+			current = true;
+		},
+		o(local) {
+			transition_out(if_block);
+			current = false;
+		},
+		d(detaching) {
+			if (if_block) if_block.d(detaching);
+			if (detaching) detach(if_block_anchor);
+		}
+	};
+}
+
+// (105:8) {#if tourlink.url}
+function create_if_block_2(ctx) {
+	let div1;
+	let p;
+	let t0;
+	let t1;
+	let a;
+	let t2_value = /*tourlink*/ ctx[7].label + "";
+	let t2;
+	let t3;
+	let div0;
+	let icon;
+	let a_href_value;
+	let t4;
+	let current;
+
+	icon = new Component$1({
+			props: { icon: "akar-icons:arrow-right" }
+		});
+
+	return {
+		c() {
+			div1 = element("div");
+			p = element("p");
+			t0 = text("Για να μάθεις την τιμή του πακέτου παρακαλώ επικοινώνησε μαζί μας !");
+			t1 = space();
+			a = element("a");
+			t2 = text(t2_value);
+			t3 = space();
+			div0 = element("div");
+			create_component(icon.$$.fragment);
+			t4 = space();
+			this.h();
+		},
+		l(nodes) {
+			div1 = claim_element(nodes, "DIV", { style: true });
+			var div1_nodes = children(div1);
+			p = claim_element(div1_nodes, "P", {});
+			var p_nodes = children(p);
+			t0 = claim_text(p_nodes, "Για να μάθεις την τιμή του πακέτου παρακαλώ επικοινώνησε μαζί μας !");
+			p_nodes.forEach(detach);
+			t1 = claim_space(div1_nodes);
+			a = claim_element(div1_nodes, "A", { class: true, href: true });
+			var a_nodes = children(a);
+			t2 = claim_text(a_nodes, t2_value);
+			t3 = claim_space(a_nodes);
+			div0 = claim_element(a_nodes, "DIV", { class: true });
+			var div0_nodes = children(div0);
+			claim_component(icon.$$.fragment, div0_nodes);
+			div0_nodes.forEach(detach);
+			a_nodes.forEach(detach);
+			t4 = claim_space(div1_nodes);
+			div1_nodes.forEach(detach);
+			this.h();
+		},
+		h() {
+			attr(div0, "class", "arrow");
+			attr(a, "class", "link svelte-10dwopc");
+			attr(a, "href", a_href_value = /*tourlink*/ ctx[7].url);
+			set_style(div1, "display", "flex");
+			set_style(div1, "align-items", "center");
+			set_style(div1, "flex-direction", "column");
+		},
+		m(target, anchor) {
+			insert_hydration(target, div1, anchor);
+			append_hydration(div1, p);
+			append_hydration(p, t0);
+			append_hydration(div1, t1);
+			append_hydration(div1, a);
+			append_hydration(a, t2);
+			append_hydration(a, t3);
+			append_hydration(a, div0);
+			mount_component(icon, div0, null);
+			append_hydration(div1, t4);
+			current = true;
+		},
+		p(ctx, dirty) {
+			if ((!current || dirty & /*selectedSport*/ 2) && t2_value !== (t2_value = /*tourlink*/ ctx[7].label + "")) set_data(t2, t2_value);
+
+			if (!current || dirty & /*selectedSport*/ 2 && a_href_value !== (a_href_value = /*tourlink*/ ctx[7].url)) {
+				attr(a, "href", a_href_value);
+			}
+		},
+		i(local) {
+			if (current) return;
+			transition_in(icon.$$.fragment, local);
+			current = true;
+		},
+		o(local) {
+			transition_out(icon.$$.fragment, local);
+			current = false;
+		},
+		d(detaching) {
+			if (detaching) detach(div1);
+			destroy_component(icon);
+		}
+	};
+}
+
+// (98:6) {#each selectedSport.availabletours as {tourlink,tourname}}
+function create_each_block(ctx) {
+	let li;
+	let button;
+	let t0_value = /*tourname*/ ctx[8] + "";
+	let t0;
+	let t1;
+	let if_block_anchor;
+	let current;
+	let mounted;
+	let dispose;
+
+	function click_handler_1() {
+		return /*click_handler_1*/ ctx[5](/*tourlink*/ ctx[7], /*tourname*/ ctx[8]);
+	}
+
+	let if_block = /*selectedTour*/ ctx[2]?.tourname === /*tourname*/ ctx[8] && create_if_block_1(ctx);
+
+	return {
+		c() {
+			li = element("li");
+			button = element("button");
+			t0 = text(t0_value);
+			t1 = space();
+			if (if_block) if_block.c();
+			if_block_anchor = empty();
+			this.h();
+		},
+		l(nodes) {
+			li = claim_element(nodes, "LI", { class: true });
+			var li_nodes = children(li);
+			button = claim_element(li_nodes, "BUTTON", { class: true });
+			var button_nodes = children(button);
+			t0 = claim_text(button_nodes, t0_value);
+			button_nodes.forEach(detach);
+			li_nodes.forEach(detach);
+			t1 = claim_space(nodes);
+			if (if_block) if_block.l(nodes);
+			if_block_anchor = empty();
+			this.h();
+		},
+		h() {
+			attr(button, "class", "svelte-10dwopc");
+			attr(li, "class", "svelte-10dwopc");
+		},
+		m(target, anchor) {
+			insert_hydration(target, li, anchor);
+			append_hydration(li, button);
+			append_hydration(button, t0);
+			insert_hydration(target, t1, anchor);
+			if (if_block) if_block.m(target, anchor);
+			insert_hydration(target, if_block_anchor, anchor);
+			current = true;
+
+			if (!mounted) {
+				dispose = listen(button, "click", click_handler_1);
+				mounted = true;
+			}
+		},
+		p(new_ctx, dirty) {
+			ctx = new_ctx;
+			if ((!current || dirty & /*selectedSport*/ 2) && t0_value !== (t0_value = /*tourname*/ ctx[8] + "")) set_data(t0, t0_value);
+
+			if (/*selectedTour*/ ctx[2]?.tourname === /*tourname*/ ctx[8]) {
+				if (if_block) {
+					if_block.p(ctx, dirty);
+
+					if (dirty & /*selectedTour, selectedSport*/ 6) {
+						transition_in(if_block, 1);
+					}
+				} else {
+					if_block = create_if_block_1(ctx);
+					if_block.c();
+					transition_in(if_block, 1);
+					if_block.m(if_block_anchor.parentNode, if_block_anchor);
+				}
+			} else if (if_block) {
+				group_outros();
+
+				transition_out(if_block, 1, 1, () => {
+					if_block = null;
+				});
+
+				check_outros();
+			}
+		},
+		i(local) {
+			if (current) return;
+			transition_in(if_block);
+			current = true;
+		},
+		o(local) {
+			transition_out(if_block);
+			current = false;
+		},
+		d(detaching) {
+			if (detaching) detach(li);
+			if (detaching) detach(t1);
+			if (if_block) if_block.d(detaching);
+			if (detaching) detach(if_block_anchor);
+			mounted = false;
+			dispose();
+		}
+	};
+}
+
+function create_fragment(ctx) {
+	let section;
+	let div;
+	let h2;
+	let t0;
+	let t1;
+	let ul;
+	let t2;
+	let current;
+	let each_value_1 = /*sports*/ ctx[0];
+	let each_blocks = [];
+
+	for (let i = 0; i < each_value_1.length; i += 1) {
+		each_blocks[i] = create_each_block_1(get_each_context_1(ctx, each_value_1, i));
+	}
+
+	let if_block = /*selectedSport*/ ctx[1] && create_if_block(ctx);
+
+	return {
+		c() {
+			section = element("section");
+			div = element("div");
+			h2 = element("h2");
+			t0 = text("Scegli uno sport:");
+			t1 = space();
+			ul = element("ul");
+
+			for (let i = 0; i < each_blocks.length; i += 1) {
+				each_blocks[i].c();
+			}
+
+			t2 = space();
+			if (if_block) if_block.c();
+			this.h();
+		},
+		l(nodes) {
+			section = claim_element(nodes, "SECTION", { class: true });
+			var section_nodes = children(section);
+			div = claim_element(section_nodes, "DIV", { class: true });
+			var div_nodes = children(div);
+			h2 = claim_element(div_nodes, "H2", { class: true });
+			var h2_nodes = children(h2);
+			t0 = claim_text(h2_nodes, "Scegli uno sport:");
+			h2_nodes.forEach(detach);
+			t1 = claim_space(div_nodes);
+			ul = claim_element(div_nodes, "UL", { class: true });
+			var ul_nodes = children(ul);
+
+			for (let i = 0; i < each_blocks.length; i += 1) {
+				each_blocks[i].l(ul_nodes);
+			}
+
+			ul_nodes.forEach(detach);
+			t2 = claim_space(div_nodes);
+			if (if_block) if_block.l(div_nodes);
+			div_nodes.forEach(detach);
+			section_nodes.forEach(detach);
+			this.h();
+		},
+		h() {
+			attr(h2, "class", "heading svelte-10dwopc");
+			attr(ul, "class", "svelte-10dwopc");
+			attr(div, "class", "card svelte-10dwopc");
+			attr(section, "class", "section-container svelte-10dwopc");
+		},
+		m(target, anchor) {
+			insert_hydration(target, section, anchor);
+			append_hydration(section, div);
+			append_hydration(div, h2);
+			append_hydration(h2, t0);
+			append_hydration(div, t1);
+			append_hydration(div, ul);
+
+			for (let i = 0; i < each_blocks.length; i += 1) {
+				if (each_blocks[i]) {
+					each_blocks[i].m(ul, null);
+				}
+			}
+
+			append_hydration(div, t2);
+			if (if_block) if_block.m(div, null);
+			current = true;
+		},
+		p(ctx, [dirty]) {
+			if (dirty & /*selectedSport, sports*/ 3) {
+				each_value_1 = /*sports*/ ctx[0];
+				let i;
+
+				for (i = 0; i < each_value_1.length; i += 1) {
+					const child_ctx = get_each_context_1(ctx, each_value_1, i);
+
+					if (each_blocks[i]) {
+						each_blocks[i].p(child_ctx, dirty);
+					} else {
+						each_blocks[i] = create_each_block_1(child_ctx);
+						each_blocks[i].c();
+						each_blocks[i].m(ul, null);
+					}
+				}
+
+				for (; i < each_blocks.length; i += 1) {
+					each_blocks[i].d(1);
+				}
+
+				each_blocks.length = each_value_1.length;
+			}
+
+			if (/*selectedSport*/ ctx[1]) {
+				if (if_block) {
+					if_block.p(ctx, dirty);
+
+					if (dirty & /*selectedSport*/ 2) {
+						transition_in(if_block, 1);
+					}
+				} else {
+					if_block = create_if_block(ctx);
+					if_block.c();
+					transition_in(if_block, 1);
+					if_block.m(div, null);
+				}
+			} else if (if_block) {
+				group_outros();
+
+				transition_out(if_block, 1, 1, () => {
+					if_block = null;
+				});
+
+				check_outros();
+			}
+		},
+		i(local) {
+			if (current) return;
+			transition_in(if_block);
+			current = true;
+		},
+		o(local) {
+			transition_out(if_block);
+			current = false;
+		},
+		d(detaching) {
 			if (detaching) detach(section);
 			destroy_each(each_blocks, detaching);
+			if (if_block) if_block.d();
 		}
 	};
 }
 
 function instance($$self, $$props, $$invalidate) {
 	let { props } = $$props;
-	let { people } = $$props;
-	let { heading } = $$props;
+	let { sports } = $$props;
+	let selectedSport = null;
+	let selectedTour = null;
+
+	function onSelectedSportModification(newSelectedSport) {
+		$$invalidate(2, selectedTour = null);
+	}
+
+	const click_handler = (sportname, availabletours) => $$invalidate(1, selectedSport = { sportname, availabletours });
+	const click_handler_1 = (tourlink, tourname) => $$invalidate(2, selectedTour = { tourlink, tourname });
 
 	$$self.$$set = $$props => {
-		if ('props' in $$props) $$invalidate(2, props = $$props.props);
-		if ('people' in $$props) $$invalidate(0, people = $$props.people);
-		if ('heading' in $$props) $$invalidate(1, heading = $$props.heading);
+		if ('props' in $$props) $$invalidate(3, props = $$props.props);
+		if ('sports' in $$props) $$invalidate(0, sports = $$props.sports);
 	};
 
-	return [people, heading, props];
+	$$self.$$.update = () => {
+		if ($$self.$$.dirty & /*selectedSport*/ 2) {
+			onSelectedSportModification();
+		}
+	};
+
+	return [sports, selectedSport, selectedTour, props, click_handler, click_handler_1];
 }
 
 class Component extends SvelteComponent {
 	constructor(options) {
 		super();
-		init(this, options, instance, create_fragment, safe_not_equal, { props: 2, people: 0, heading: 1 });
+		init(this, options, instance, create_fragment, safe_not_equal, { props: 3, sports: 0 });
 	}
 }
 
